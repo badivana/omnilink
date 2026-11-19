@@ -1,0 +1,6 @@
+# Optional insecure listener. Use only on an isolated network or for a short test.
+# The normal compose.yaml keeps MQTT TLS on 8883 and does not publish port 1883.
+services:
+  mosquitto:
+    ports:
+      - "1883:1883"

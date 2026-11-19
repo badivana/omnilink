@@ -1,0 +1,97 @@
+# ======================================================
+# OmniLink Master Git Ignore
+# ======================================================
+
+# ------------------------------------------------------
+# 1. Environment Variables & Secrets (CRITICAL)
+# ------------------------------------------------------
+.env
+*.env
+!.env.example
+credential.md
+device-credentials.json
+*.key
+*.pem
+*.pfx
+*.p12
+
+# ------------------------------------------------------
+# 2. Database & Runtime State
+# ------------------------------------------------------
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+data/omnilink.db*
+data/simulator-*.json
+
+# ------------------------------------------------------
+# 3. Mosquitto Broker State & Generated Configs
+# ------------------------------------------------------
+data/mosquitto/dynamic-security.json
+data/mosquitto/mosquitto.db
+data/mosquitto/*.json
+data/mosquitto/*.db
+# Keep the directory structure
+!data/mosquitto/.gitkeep
+
+# ------------------------------------------------------
+# 4. Generated TLS Certificates
+# ------------------------------------------------------
+data/certs/*.key
+data/certs/*.crt
+data/certs/*.csr
+!data/certs/.gitkeep
+
+# ------------------------------------------------------
+# 5. Python Environment & Caches
+# ------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ------------------------------------------------------
+# 6. Embedded Hardware (Arduino / ESP) Build Artifacts
+# ------------------------------------------------------
+*.bin
+*.elf
+*.hex
+*.out
+*.map
+.arduino15/
+
+# ------------------------------------------------------
+# 7. IDE, Editor & OS Files
+# ------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.vscode/
+.idea/
+.kilo/
+.sf/
+*.sublime-project
+*.sublime-workspace
+
+# ------------------------------------------------------
+# 8. Logs & Temporary Files
+# ------------------------------------------------------
+*.log
+*.tmp
+tmp/
+temp/

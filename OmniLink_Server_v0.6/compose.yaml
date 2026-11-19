@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: omnilink
+      POSTGRES_USER: omnilink
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run setup first}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U omnilink -d omnilink']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    user: '0:0'
+    entrypoint: [/bin/sh, /entrypoint-omnilink.sh]
+    environment:
+      OMNILINK_MQTT_ADMIN_PASSWORD: ${OMNILINK_MQTT_ADMIN_PASSWORD:?Run setup first}
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto-entrypoint.sh:/entrypoint-omnilink.sh:ro
+      - ./data/certs:/certs-ro:ro
+      - broker-data:/mosquitto/data
+    ports:
+      - '8883:8883'
+    restart: unless-stopped
+  omnilink:
+    build: .
+    environment:
+      OMNILINK_ENCRYPTION_KEY: ${OMNILINK_ENCRYPTION_KEY:?Run setup first}
+      OMNILINK_DATABASE_URL: postgresql+psycopg://omnilink:${POSTGRES_PASSWORD}@postgres/omnilink
+      OMNILINK_BOOTSTRAP_EMAIL: ${OMNILINK_BOOTSTRAP_EMAIL}
+      OMNILINK_BOOTSTRAP_PASSWORD: ${OMNILINK_BOOTSTRAP_PASSWORD:-}
+      OMNILINK_PUBLIC_URL: ${OMNILINK_PUBLIC_URL}
+      OMNILINK_SECURE_COOKIE: ${OMNILINK_SECURE_COOKIE:-false}
+      OMNILINK_CLIENT_DIR: ${OMNILINK_CLIENT_DIR:-}
+      OMNILINK_HTTP_HOST: 0.0.0.0
+      OMNILINK_NATIVE_HOST: 0.0.0.0
+      OMNILINK_MQTT_ENABLED: 'true'
+      OMNILINK_MQTT_HOST: mosquitto
+      OMNILINK_MQTT_PORT: '1883'
+      OMNILINK_MQTT_PASSWORD: ${OMNILINK_MQTT_PASSWORD}
+      OMNILINK_MQTT_ADMIN_PASSWORD: ${OMNILINK_MQTT_ADMIN_PASSWORD}
+      OMNILINK_PROXY_IPS: '*'
+    volumes:
+      - ./data/certs:/certs-ro:ro
+      - ./web-client:/web-client:ro
+    ports:
+      - '7443:7443'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health/ready", timeout=3)']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      OMNILINK_SITE_ADDRESS: ${OMNILINK_SITE_ADDRESS:-http://localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - '80:80'
+      - '443:443'
+    depends_on:
+      omnilink:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  broker-data:
+  caddy-data:
+  caddy-config:
