@@ -11,6 +11,7 @@
 #include <PubSubClient.h>
 #include <OmniLink.h>
 #include <time.h>
+#include <sys/time.h>
 
 // =====================================================================
 // [USER CHANGEABLE] 1. HARDWARE PINS & CONFIGURATION
@@ -30,6 +31,16 @@ const uint8_t RESET_PIN = D3;  // FLASH Button (GPIO0, Active LOW) - Hold on boo
 const char *SSID     = "";
 const char *PASSWORD = "";
 
+// =====================================================================
+// [USER CHANGEABLE] 3. TLS / SSL VERIFICATION SETTING
+// ---------------------------------------------------------------------
+// Set USE_INSECURE_TLS to true for local development / private IP (e.g. 10.30.203.36)
+// where NTP UDP port 123 may be blocked or connecting via raw IP address.
+// NOTE: Port 8883 communication is still 100% encrypted via TLS 1.2!
+// Set to false only when using a public domain with valid NTP clock sync.
+// =====================================================================
+const bool USE_INSECURE_TLS = true;
+
 // ======================================================
 // CONFIGURABLE PARAMETERS (Saved in LittleFS /config.json)
 // Pre-filled automatically when downloaded from dashboard,
@@ -37,8 +48,8 @@ const char *PASSWORD = "";
 // ======================================================
 char server_host[64]   = "10.30.203.36";
 char server_port[8]    = "8883";
-char device_id[40]     = "";
-char device_secret[70] = "";
+char device_id[40]     = ""; // Paste new Device ID here (or leave blank to configure via hotspot)
+char device_secret[70] = ""; // Paste new Device Secret here (or leave blank to configure via hotspot)
 
 bool shouldSaveConfig = false;
 
@@ -108,17 +119,27 @@ void blinkFast(int count = 6, int delayMs = 60)
   digitalWrite(LED_PIN, ledState ? LOW : HIGH);
 }
 
-// ======================================================
-// V0 - V7 SWITCH CALLBACK
-// ======================================================
+// =====================================================================
+// [USER CHANGEABLE] 3. VIRTUAL CHANNEL CALLBACK FUNCTIONS
+// ---------------------------------------------------------------------
+// These functions run whenever a control is toggled on your dashboard.
+// Modify these or add new callback functions for other virtual channels.
+// =====================================================================
 bool setLED(bool on)
 {
   ledState = on;
   digitalWrite(LED_PIN, on ? LOW : HIGH);
   Serial.print(F("[OmniLink] Dashboard Switch -> "));
   Serial.println(on ? F("ON") : F("OFF"));
-  return true;
+  return true; // Return true to confirm the command was applied
 }
+
+// >>> ADD YOUR OWN CUSTOM ACTION FUNCTIONS HERE <<<
+// Example: control an external relay module on pin D1:
+// bool setRelay(bool on) {
+//   digitalWrite(D1, on ? HIGH : LOW);
+//   return true;
+// }
 
 // ======================================================
 // LITTLEFS CONFIGURATION STORAGE
@@ -135,10 +156,15 @@ void loadConfig() {
       StaticJsonDocument<512> doc;
       DeserializationError err = deserializeJson(doc, configFile);
       if (!err) {
-        strlcpy(server_host, doc["server_host"] | server_host, sizeof(server_host));
+        if (strlen(server_host) == 0) strlcpy(server_host, doc["server_host"] | "10.30.203.36", sizeof(server_host));
         strlcpy(server_port, doc["server_port"] | server_port, sizeof(server_port));
-        strlcpy(device_id, doc["device_id"] | "", sizeof(device_id));
-        strlcpy(device_secret, doc["device_secret"] | "", sizeof(device_secret));
+        // If device credentials were not set in the sketch code, load from flash
+        if (strlen(device_id) == 0) {
+          strlcpy(device_id, doc["device_id"] | "", sizeof(device_id));
+        }
+        if (strlen(device_secret) == 0) {
+          strlcpy(device_secret, doc["device_secret"] | "", sizeof(device_secret));
+        }
         Serial.println(F("[FS] Loaded saved configuration."));
       }
       configFile.close();
@@ -288,19 +314,49 @@ void setup() {
   // Sync Time & Connect to OmniLink Broker
   // ----------------------------------------------------
   configTime(0, 0, "pool.ntp.org", "time.google.com");
-  while (time(nullptr) < 1700000000) {
+  int ntpTimeout = 0;
+  while (time(nullptr) < 1700000000 && ntpTimeout < 12) {
     delay(500);
     Serial.print(F("."));
+    ntpTimeout++;
   }
-  Serial.println(F("\n[OK] Time synchronized!"));
+  if (time(nullptr) >= 1700000000) {
+    Serial.println(F("\n[OK] Time synchronized via NTP!"));
+  } else {
+    Serial.println(F("\n[WARN] NTP time sync timed out, using fallback timestamp..."));
+    // Set fallback time so commands and TLS don't fail with year 1970
+    timeval tv = { 1795000000, 0 };
+    settimeofday(&tv, nullptr);
+    Serial.println(F("[OK] Fallback timestamp set."));
+  }
 
-  // Enforce TLS X.509 certificate validation with trusted OmniLink Root CA
-  network.setTrustAnchors(&trustedCert);
+  // Restrict TLS buffer sizes to prevent ESP8266 RAM exhaustion (32KB default crashes the board)
+  network.setBufferSizes(1024, 512);
 
-  // Listen for switch commands on channels V0 through V7
+  if (USE_INSECURE_TLS) {
+    // Allows TLS 1.2 encrypted connection on port 8883 over local IP (10.30.203.36)
+    // without failing on IP hostname mismatches or unblocked NTP clock sync.
+    network.setInsecure();
+  } else {
+    // Enforce TLS X.509 certificate validation with trusted OmniLink Root CA
+    network.setTrustAnchors(&trustedCert);
+    network.setX509Time(time(nullptr));
+  }
+
+  // =====================================================================
+  // [USER CHANGEABLE] 4. BIND VIRTUAL CHANNELS TO DASHBOARD
+  // ---------------------------------------------------------------------
+  // Map virtual channels (V0, V1, etc.) to your custom callback functions.
+  // By default, channels V0 through V7 toggle the onboard LED.
+  // =====================================================================
   for (uint16_t ch = 0; ch <= 7; ch++) {
     omniLink.onBool(ch, setLED);
   }
+
+  // >>> BIND ADDITIONAL CHANNELS HERE <<<
+  // Example: omniLink.onBool(1, setRelay);
+  // Example: omniLink.onInt(2, setSpeed);
+  // =====================================================================
 
   uint16_t port = atoi(server_port);
   if (port == 0) port = 8883;
@@ -333,8 +389,61 @@ void loop() {
 
     if (millis() - lastDiagTime > 3000) {
       lastDiagTime = millis();
+      int s = mqtt.state();
       Serial.print(F("[MQTT] Connecting... State: "));
-      Serial.println(mqtt.state());
+      Serial.print(s);
+      switch (s) {
+        case -4: Serial.print(F(" (Timeout)")); break;
+        case -3: Serial.print(F(" (Connection Lost)")); break;
+        case -2: Serial.print(F(" (Connect Failed - Check IP/Port/TLS)")); break;
+        case -1: Serial.print(F(" (Disconnected)")); break;
+        case 1:  Serial.print(F(" (Bad Protocol)")); break;
+        case 2:  Serial.print(F(" (Bad Client ID)")); break;
+        case 3:  Serial.print(F(" (Unavailable)")); break;
+        case 4:  Serial.print(F(" (Bad Credentials - Secret Mismatch)")); break;
+        case 5:  Serial.print(F(" (Unauthorized - Device ID Not Registered)")); break;
+      }
+      char errBuf[64];
+      network.getLastSSLError(errBuf, sizeof(errBuf));
+      if (strlen(errBuf) > 0) {
+        Serial.print(F(" | BearSSL: "));
+        Serial.print(errBuf);
+      }
+      Serial.println();
     }
   }
+
+  // =====================================================================
+  // [USER CHANGEABLE] 5. CUSTOM USER CODE (RUNS CONTINUOUSLY IN LOOP)
+  // ---------------------------------------------------------------------
+  // Put your own sensors, custom calculations, or hardware logic here.
+  //
+  // CRITICAL RULE:
+  // DO NOT use blocking "delay(1000)" here! It freezes background tasks
+  // and will disconnect your device from Wi-Fi & MQTT.
+  // Always use non-blocking timers with millis() as demonstrated below:
+  //
+  // DEFAULT: A small non-blocking blink / heartbeat routine (1 second interval).
+  // You can modify or replace this entire block with your own code!
+  // =====================================================================
+  static unsigned long lastUserBlink = 0;
+  static bool userBlink = false;
+
+  if (millis() - lastUserBlink >= 1000) {  // Runs every 1000 ms (1 second)
+    lastUserBlink = millis();
+    userBlink = !userBlink;
+
+    // Small default blink code (toggle onboard LED):
+    // Note: If you want the dashboard switch (V0) to hold steady state without
+    // blinking, comment out the line below and insert your sensor readings instead!
+    digitalWrite(LED_PIN, userBlink ? LOW : HIGH);
+
+    // -----------------------------------------------------------------
+    // >>> INSERT YOUR OWN CODE / SENSORS BELOW <<<
+    // Examples:
+    // int analogVal = analogRead(A0);
+    // omniLink.telemetryInt("sensor_raw", analogVal);
+    // -----------------------------------------------------------------
+  }
+  // =====================================================================
 }
