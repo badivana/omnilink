@@ -3,8 +3,8 @@
    The Uno has no network hardware: a computer runs the server's gateway, which
    talks to OmniLink. Paste the device ID and secret below; the gateway reads
    them from the board over USB when it starts. Upload, close Serial Monitor,
-   then either set OMNILINK_SERIAL_GATEWAY=COM4 in the server's .env (the server
-   starts the gateway itself) or run in the server folder:
+   then either set OMNILINK_SERIAL_GATEWAY=COM4 in the server's .env (run.bat
+   then opens the gateway in its own window) or run in the server folder:
      .venv\Scripts\python examples\arduino_uno_serial_gateway.py --serial COM4 --url https://iot.example.com
 
    Matches the demo device made by the server:  python -m examples.create_demo

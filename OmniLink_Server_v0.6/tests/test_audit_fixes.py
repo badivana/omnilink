@@ -85,14 +85,6 @@ async def test_webhook_is_sent_without_the_database_lock(system):
         await asyncio.sleep(.1)
     assert status=='completed' and calls==[('hi',False)]
 
-def test_serial_gateway_runs_against_this_server():
-    from omnilink.__main__ import gateway_command,GATEWAY
-    from omnilink.settings import Settings
-    cmd=gateway_command(Settings(serial_gateway=' COM7 ',http_host='0.0.0.0',http_port=8000))
-    assert GATEWAY.is_file() and cmd[1:]==[str(GATEWAY),'--serial','COM7','--url','http://127.0.0.1:8000']
-    cmd=gateway_command(Settings(serial_gateway='COM7',http_tls=True,tls_cert='data/certs/server.crt'))
-    assert cmd[cmd.index('--url')+1].startswith('https://') and cmd[-2:]==['--ca',str(__import__('pathlib').Path('data/certs/ca.crt'))]
-
 def test_library_zip_builds_from_the_package_next_to_the_server(tmp_path):
     import sys,pytest;sys.path.insert(0,str(__import__('pathlib').Path(__file__).resolve().parents[1]/'tools'))
     from build_arduino_library import build,LIBRARY

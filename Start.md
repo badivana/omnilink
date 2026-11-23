@@ -6,19 +6,21 @@ Paths and addresses below match this PC:
 
 If the PC's IP address changes, see "IP address changed" at the bottom.
 
-## 1. Start Mosquitto (needed for ESP8266/ESP32 over MQTT)
+## Start everything (one command)
 
-```powershell
-cd C:\Users\ASUS\Downloads\omnilink-main\omnilink-main\OmniLink_Server_v0.6
-.\tools\run_mosquitto_windows.ps1
-```
-
-## 2. Start the server
+Close the Arduino Serial Monitor first, then:
 
 ```powershell
 cd C:\Users\ASUS\Downloads\omnilink-main\omnilink-main\OmniLink_Server_v0.6
 .\run.bat
 ```
+
+This opens three windows' worth of work:
+- **"Mosquitto"** window: the MQTT broker (for the ESP8266), if not already running;
+- **"OmniLink gateway COM7"** window: the Nano gateway (`OMNILINK_SERIAL_GATEWAY=COM7` in `.env`), if not already open;
+- this window: the OmniLink server.
+
+Keep all three open. Ctrl+C here stops only the server. Running `run.bat` again reuses windows that are already open.
 
 Open in the browser (use exactly this address, or you get "Origin rejected"):
 - dashboard: http://10.100.88.185:8000/client/
@@ -26,16 +28,13 @@ Open in the browser (use exactly this address, or you get "Origin rejected"):
 
 Health check: http://10.100.88.185:8000/health/ready (`"mqtt":true` means Mosquitto is connected)
 
-## 3. Start the Nano gateway (Arduino Nano/Uno over USB)
+## Upload new Nano code (server keeps running)
 
-Close the Arduino Serial Monitor first. Replace `COM7` with the Nano's port (Device Manager, `USB-SERIAL CH340`).
+1. In the **"OmniLink gateway COM7"** window press **Ctrl+C**.
+2. Upload from the Arduino IDE.
+3. In that same window press **↑** then **Enter** to start the gateway again.
 
-```powershell
-cd C:\Users\ASUS\Downloads\omnilink-main\omnilink-main\OmniLink_Server_v0.6
-.\.venv\Scripts\python.exe examples\arduino_uno_serial_gateway.py --serial COM7 --url http://127.0.0.1:8000
-```
-
-Upload new Nano code: press **Ctrl+C** here, upload from the Arduino IDE, then run the gateway line again (**↑** then **Enter**). The server keeps running.
+If the Nano's port changes (another USB socket), update `OMNILINK_SERIAL_GATEWAY` in `.env` (Device Manager shows it as `USB-SERIAL CH340 (COMx)`).
 
 ## Arduino library
 

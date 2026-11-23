@@ -101,13 +101,7 @@ Keep that window open. It prints `Connected; N configured pins: …` when the bo
 
 The board resets when the gateway connects, so its outputs briefly return to their power-on state.
 
-**Optional: start the gateway with the server.** Add `OMNILINK_SERIAL_GATEWAY=COM7` to `.env` and restart `run.bat`. The server then runs the gateway itself and restarts it 5 seconds after it stops. It supports one board. Because the server then holds the port, an upload must happen in that 5-second gap: click **Verify**, stop only the gateway process, then click **Upload** immediately:
-
-```powershell
-Get-CimInstance Win32_Process | Where-Object CommandLine -like '*arduino_uno_serial_gateway*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-```
-
-If you upload often, use the separate gateway window instead.
+**One command for everything (Windows).** Add `OMNILINK_SERIAL_GATEWAY=COM7` (your board's port) to `.env`. `run.bat` then opens Mosquitto and the gateway in their own windows ("Mosquitto", "OmniLink gateway COM7") and starts the server in its window. Windows that are already open are reused, so running `run.bat` again is safe. Uploading works as above: Ctrl+C in the gateway window, upload, then ↑ Enter in that window. It supports one board; start more gateways by hand. Leave the setting empty to start the gateway yourself.
 
 **Keeping the secret off the board.** Leave `DEVICE_ID` and `DEVICE_SECRET` empty in the sketch and pass a credentials file to the gateway instead: `--credentials "C:\Users\YOUR_NAME\Documents\device-credentials.json"` containing `{"id":"dev_...","secret":"..."}`. Otherwise anyone with USB access to the board can read its secret.
 
@@ -261,7 +255,7 @@ Run the server setup with the public DNS name first. On Windows, open an Adminis
 powershell -ExecutionPolicy Bypass -File tools\setup_mosquitto_windows.ps1
 ```
 
-In a second PowerShell window, start the broker:
+After that, `run.bat` starts the broker for you: it opens Mosquitto in its own window when it is set up and not already running, then starts the server. To start the broker by hand instead:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\run_mosquitto_windows.ps1
@@ -275,7 +269,7 @@ sudo sh tools/setup_mosquitto_vps.sh
 sh run.sh
 ```
 
-The native setup binds the app's HTTPS API to TCP 8000, ONP TLS to 7443, MQTT TLS to 8883, and keeps Mosquitto's internal server/control connection on loopback port 1884. Open only the needed public ports in the VPS firewall/security group. Native Mosquitto starts as a system service on Linux; on Windows, keep its broker PowerShell window open. For a no-TLS MQTT test on a private network only, add `-EnablePlain` on Windows or `--plain` on Linux. That exposes port 1883 and device secrets, so never enable it on a public VPS.
+The native setup binds the app's HTTPS API to TCP 8000, ONP TLS to 7443, MQTT TLS to 8883, and keeps Mosquitto's internal server/control connection on loopback port 1884. Open only the needed public ports in the VPS firewall/security group. Native Mosquitto starts as a system service on Linux; on Windows, keep its "Mosquitto" window (opened by `run.bat`) open. For a no-TLS MQTT test on a private network only, add `-EnablePlain` on Windows or `--plain` on Linux. That exposes port 1883 and device secrets, so never enable it on a public VPS.
 
 Use a VPS or another host that supports persistent processes and raw TCP ports. Static hosting alone cannot run this server. The provided Compose configuration is for **one OmniLink application instance**; do not increase Uvicorn workers or scale the application service horizontally.
 

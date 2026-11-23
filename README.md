@@ -87,7 +87,7 @@ The platform provides a **Python backend**, an **Eclipse Mosquitto MQTT broker**
   - REST API & WebSockets for client dashboards.
   - Mosquitto Dynamic Security management (automatic MQTT user and ACL provisioning).
   - OmniLink Native Protocol (ONP TLS) binary stream on port 7443.
-  - Serial gateway for Arduino Uno / Nano over USB (`examples/arduino_uno_serial_gateway.py`): reads the board's device ID/secret over USB and talks to the HTTP device API. Run it in its own window, or let the server start it via `OMNILINK_SERIAL_GATEWAY` in `.env`.
+  - Serial gateway for Arduino Uno / Nano over USB (`examples/arduino_uno_serial_gateway.py`): reads the board's device ID/secret over USB and talks to the HTTP device API. Run it in its own window, or set `OMNILINK_SERIAL_GATEWAY` in `.env` so `run.bat` opens it for you.
 
 ### 2. Message Broker (Eclipse Mosquitto)
 - **Engine**: Eclipse Mosquitto 2.x.
@@ -221,19 +221,14 @@ Because OmniLink uses a private, self-hosted Certificate Authority for end-to-en
 
 ### Step 5: Run the Services
 
-Start the services in two separate terminals:
+One command starts both:
 
-**Terminal 1 — Mosquitto Broker:**
-```powershell
-cd D:\OmniLink\OmniLink_Server_v0.6
-.\tools\run_mosquitto_windows.ps1
-```
-
-**Terminal 2 — OmniLink Server:**
 ```bat
 cd D:\OmniLink\OmniLink_Server_v0.6
 .\run.bat
 ```
+
+`run.bat` first starts the Mosquitto broker in its own **"Mosquitto" window** (only if it is set up and not already running), then the Nano/Uno serial gateway in its own window if `OMNILINK_SERIAL_GATEWAY` is set in `.env` (see [Run the serial gateway](#3-run-the-serial-gateway)), then the OmniLink server in the current window. Keep both windows open. Stopping the server (Ctrl+C) leaves Mosquitto running, so ESP boards stay connected to the broker; the next `run.bat` reuses it. To stop Mosquitto too, close its window.
 
 Now open your browser and go to:
 - **Dashboard**: `https://localhost:8000/client/` (or `https://<YOUR_LAN_IP>:8000/client/`)
@@ -259,7 +254,7 @@ Now open your browser and go to:
 2. The browser downloads `OmniLink_<DeviceName>_Setup.ino` with the server host and credentials pre-filled.
 3. Make sure the OmniLink library is installed (see [Prerequisites](#prerequisites)).
 4. Open the downloaded `.ino` file in the Arduino IDE, select your NodeMCU board and its COM port (a NodeMCU usually shows as `Silicon Labs CP210x` or `CH340` in Device Manager), and click **Upload**.
-5. Make sure Mosquitto is running (Terminal 1 in [Step 5](#step-5-run-the-services)); ESP boards connect through it.
+5. Make sure the server was started with `run.bat` (it also starts Mosquitto, see [Step 5](#step-5-run-the-services)); ESP boards connect through Mosquitto.
 
 **Customizing the sketch:** your own logic goes in `userLoop()` (section **5. YOUR MAIN CODE**), which replaces the blink example. Map dashboard pins to your own functions in section **6. BIND VIRTUAL CHANNELS**. Never use a long `delay()`; use `millis()` timers so Wi-Fi and MQTT keep running.
 
@@ -394,7 +389,7 @@ The board resets whenever the gateway opens the port, so its outputs briefly ret
 
 **More than one board:** run one gateway per board, each in its own window with its own `--serial` port. Each board needs its own device (ID/secret) and its own pin numbers.
 
-**Optional: start the gateway together with the server.** Add `OMNILINK_SERIAL_GATEWAY=COM7` to `OmniLink_Server_v0.6\.env` and restart `run.bat`. The server then runs the gateway for one board on `127.0.0.1` and restarts it 5 s after it stops (for example when the board is unplugged). Because the server then holds the port, uploading needs the gateway stopped first; see the server README. Remove the line to go back to running the gateway by hand.
+**Start everything with one command.** Add `OMNILINK_SERIAL_GATEWAY=COM7` (your Nano's port) to `OmniLink_Server_v0.6\.env`. From then on `run.bat` opens the gateway in its own **"OmniLink gateway COM7"** window (next to the "Mosquitto" window) and starts the server; windows already open are reused. Uploading new code works the same: Ctrl+C in the gateway window, upload, ↑ Enter. One board only; start extra gateways by hand. Remove the line to go back to starting the gateway yourself.
 
 Full details and troubleshooting: [`OmniLink_Server_v0.6/README.md` → Arduino devices](OmniLink_Server_v0.6/README.md#arduino-devices).
 
