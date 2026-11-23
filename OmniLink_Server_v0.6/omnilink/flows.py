@@ -1,5 +1,5 @@
 """Bounded, persistent visual workflows. No user code is evaluated."""
-import copy,json,math,re,secrets,smtplib,ssl,time
+import copy,json,math,re,secrets,smtplib,ssl,threading,time
 import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from datetime import datetime,timezone
@@ -191,25 +191,50 @@ class Engine:
                 if previous!=val:
                     try:self.launch(s,flow,trigger=val)
                     except DomainError:pass
-    def external(self,s,n,run):
+    def prepare_external(self,s,n,run,state):
+        """Snapshot an integration call inside the transaction; it is sent after commit."""
         cfg=s.get(PlatformSetting,'integrations');entry=(cfg.value if cfg else {}).get(n.get('integration'))
         if not entry:raise DomainError('Integration removed')
-        secret=self.rt.core.cipher.decrypt(entry['secret_cipher'].encode()).decode() if entry.get('secret_cipher') else ''
-        if n['kind']=='webhook':
-            headers={'X-OmniLink-Run':run.id}
-            if secret:headers['Authorization']='Bearer '+secret
-            with httpx.Client(timeout=5,trust_env=False,follow_redirects=False) as c:
-                response=c.post(entry['url'],json={'run_id':run.id,'message':n.get('message',''),'variables':run.state['variables']},headers=headers)
-                if not 200<=response.status_code<300:raise DomainError(f'Webhook returned HTTP {response.status_code}')
-        else:
+        job={'run':run.id,'node':n['id'],'kind':n['kind'],'entry':copy.deepcopy(entry),'message':n.get('message',''),'variables':copy.deepcopy(state['variables'])}
+        if n['kind']=='email':
             owner=s.scalar(select(User).where(User.tenant_id==run.tenant_id,User.role=='admin',User.enabled==True).order_by(User.id))
             if not owner:raise DomainError('No enabled account owner email')
-            msg=EmailMessage();msg['Subject']='OmniLink automation';msg['From']=entry['sender'];msg['To']=owner.email;msg.set_content(n.get('message','Automation notification'))
+            job['to']=owner.email
+        return job
+    def external(self,job):
+        # Runs with no database lock held: a slow receiver must not stall the server.
+        entry=job['entry']
+        secret=self.rt.core.cipher.decrypt(entry['secret_cipher'].encode()).decode() if entry.get('secret_cipher') else ''
+        if job['kind']=='webhook':
+            headers={'X-OmniLink-Run':job['run']}
+            if secret:headers['Authorization']='Bearer '+secret
+            with httpx.Client(timeout=5,trust_env=False,follow_redirects=False) as c:
+                response=c.post(entry['url'],json={'run_id':job['run'],'message':job['message'],'variables':job['variables']},headers=headers)
+                if not 200<=response.status_code<300:raise DomainError(f'Webhook returned HTTP {response.status_code}')
+        else:
+            msg=EmailMessage();msg['Subject']='OmniLink automation';msg['From']=entry['sender'];msg['To']=job['to'];msg.set_content(job['message'] or 'Automation notification')
             with smtplib.SMTP(entry['host'],entry.get('port',587),timeout=5) as smtp:
                 smtp.starttls(context=ssl.create_default_context())
                 if entry.get('username'):smtp.login(entry['username'],secret)
                 smtp.send_message(msg)
     def tick(self):
+        jobs=self._tick()
+        # Sent in the background so a slow receiver cannot delay the worker's command delivery.
+        if jobs:threading.Thread(target=self._send,args=(jobs,),daemon=True,name='omnilink-integrations').start()
+    def _send(self,jobs):
+        results=[]
+        for job in jobs:
+            try:self.external(job);results.append((job,'ok'))
+            except Exception as error:results.append((job,str(error)[:240] or type(error).__name__))
+        with self.rt.db.lock,self.rt.db.session.begin() as s:
+            for job,result in results:
+                run=s.get(FlowRun,job['run'])
+                if not run or run.status!='running':continue
+                state=copy.deepcopy(run.state)
+                for item in state['queue']:
+                    if item['id']==job['node'] and isinstance(item.get('external'),dict):item['external']=result
+                run.state=state
+    def _tick(self):
         rt=self.rt;now=now_ms()
         with rt.db.lock,rt.db.session.begin() as s:
             for f in s.scalars(select(Flow).where(Flow.enabled==True)):
@@ -228,9 +253,12 @@ class Engine:
                     try:self.launch(s,f,trigger=event)
                     except DomainError:pass
             s.flush()
-            runs=list(s.scalars(select(FlowRun).where(FlowRun.status=='running').order_by(FlowRun.created_ms).limit(128)))
-            for run in runs:self.advance(s,run,now)
-    def advance(self,s,run,now):
+            # Least recently advanced first, so long waits cannot starve newer runs.
+            runs=list(s.scalars(select(FlowRun).where(FlowRun.status=='running').order_by(FlowRun.updated_ms,FlowRun.created_ms).limit(128)))
+            jobs=[]
+            for run in runs:self.advance(s,run,now,jobs)
+        return jobs
+    def advance(self,s,run,now,jobs):
         state=copy.deepcopy(run.state);nodes={n['id']:n for n in run.graph['nodes']};account=s.get(Account,run.tenant_id)
         if account and not account.enabled:run.status='cancelled';return
         if now-run.created_ms>7*86400_000:run.status='failed';return
@@ -272,7 +300,14 @@ class Engine:
                     state['variables'][n['variable']]=result
                 elif kind=='alert' and not run.test:s.add(Alert(id=secrets.token_hex(16),tenant_id=run.tenant_id,device_id=n.get('device_id',''),message=n.get('message','Flow alert'),severity=n.get('severity','warning')))
                 elif kind in ('webhook','email') and not run.test:
-                    run.state=state;self.external(s,n,run)
+                    # 'external' is unset (not sent), {'at':ms} (sending after commit), 'ok', or an error text.
+                    sent=item.get('external')
+                    if sent is None:
+                        jobs.append(self.prepare_external(s,n,run,state));item['external']={'at':now};waiting=True
+                    elif isinstance(sent,dict):
+                        if now-sent['at']>60_000:raise DomainError('Integration call did not complete')
+                        waiting=True
+                    elif sent!='ok':raise DomainError(sent)
                 elif kind=='flow':
                     f=s.get(Flow,n['flow_id'])
                     if not f or f.tenant_id!=run.tenant_id or not f.enabled:raise DomainError('Referenced flow is not published and enabled')
@@ -280,7 +315,7 @@ class Engine:
                 elif kind=='stop':state['log'].append({'node':n['id'],'status':'completed','at':now});state['queue']=[];run.status='completed';run.state=state;return
             except Exception as error:
                 if item.get('attempt',0)<n.get('retries',0):
-                    item['attempt']=item.get('attempt',0)+1;item['due']=now+1000*item['attempt'];item['started']=now;item.pop('command',None);remaining.append(item);continue
+                    item['attempt']=item.get('attempt',0)+1;item['due']=now+1000*item['attempt'];item['started']=now;item.pop('command',None);item.pop('external',None);remaining.append(item);continue
                 port='error';state['log'].append({'node':n['id'],'status':'failed','detail':str(error)[:240],'at':now})
                 if not any(e['from']==n['id'] and e.get('port')=='error' for e in run.graph['edges']):run.status='failed';state['queue']=[];run.state=state;return
             if waiting:

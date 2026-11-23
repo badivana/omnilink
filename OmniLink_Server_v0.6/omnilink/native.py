@@ -172,7 +172,9 @@ class NativeSession:
                 d=self.rt.core.device(s,self.device_id,enabled=True)
                 for ch in s.scalars(select(Channel).where(Channel.device_id==d.id,Channel.number>=first,Channel.number<first+count)):
                     if ch.desired is not None and ch.writable:
-                        self.rt.core._write(s,d,ch.number,ch.desired,'sync')
+                        # A desired value made invalid by a later bounds change is skipped, not fatal.
+                        try: self.rt.core._write(s,d,ch.number,ch.desired,'sync')
+                        except DomainError: pass
         else: raise onp.ProtocolError('Unsupported message type')
         if f.flags&onp.ACK_REQUESTED or f.type==0x12:
             await self.send(0x80,onp.encode_ack(onp.Ack(bytes(16),0,0)),f.message_id,onp.RESPONSE)

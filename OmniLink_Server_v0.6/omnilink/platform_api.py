@@ -219,7 +219,7 @@ def install(app,rt):
         u=auth.user(request)
         with rt.db.lock,rt.db.session.begin() as s:
             b=board(s,u,bid);widgets=validate_widgets(rt.core,s,b.device_id if b.device_id!='*' else '',body.widgets,u.tenant_id)
-            platform.update_board(rt,s,b,widgets,body.name,body.revision);result=dashboard_obj(b)
+            platform.update_board(rt,s,b,widgets,body.name,body.revision,u.role=='admin');result=dashboard_obj(b)
         notify(u,'dashboard');return result
     @app.delete('/api/dashboards/{bid}')
     def remove_board(bid:str,revision:int,request:Request):
@@ -227,8 +227,8 @@ def install(app,rt):
         with rt.db.lock,rt.db.session.begin() as s:
             b=board(s,u,bid)
             if b.revision!=revision:raise DomainError('Dashboard changed. Reload first.',409)
-            refs=set().union(*(platform.widget_refs(w,b.device_id) for w in b.widgets)) if b.widgets else set()
-            platform.release(s,u.tenant_id,refs,b.id);s.delete(b)
+            if u.role=='admin':platform.release(s,u.tenant_id,platform.board_refs(b),b.id)
+            s.delete(b)
         notify(u,'dashboard');return {'ok':True}
     @app.get('/api/history')
     def history(request:Request,device_id:str,metric:str='',start_ms:int=0,end_ms:int=9223372036854775807,limit:int=1000):

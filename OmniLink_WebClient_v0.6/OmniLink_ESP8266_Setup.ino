@@ -120,7 +120,7 @@ void blinkFast(int count = 6, int delayMs = 60)
 }
 
 // =====================================================================
-// [USER CHANGEABLE] 3. VIRTUAL CHANNEL CALLBACK FUNCTIONS
+// [USER CHANGEABLE] 4. VIRTUAL CHANNEL CALLBACK FUNCTIONS
 // ---------------------------------------------------------------------
 // These functions run whenever a control is toggled on your dashboard.
 // Modify these or add new callback functions for other virtual channels.
@@ -140,6 +140,49 @@ bool setLED(bool on)
 //   digitalWrite(D1, on ? HIGH : LOW);
 //   return true;
 // }
+
+// #####################################################################
+// #####################################################################
+// ##                                                                 ##
+// ##   [USER CHANGEABLE] 5. YOUR MAIN CODE  ->  userLoop()           ##
+// ##                                                                 ##
+// ##   REPLACE THE BLINK EXAMPLE BELOW WITH YOUR OWN CODE.            ##
+// ##   loop() calls this function over and over, after Wi-Fi, OTA    ##
+// ##   and OmniLink have done their work. You do not need to edit    ##
+// ##   loop() or setup() for normal projects.                        ##
+// ##                                                                 ##
+// ##   RULE: never use a long delay() here. It blocks Wi-Fi and MQTT  ##
+// ##   and the device goes offline. Use millis() timers, as below.   ##
+// ##                                                                 ##
+// #####################################################################
+// #####################################################################
+void userLoop() {
+  // ------------------- START OF EXAMPLE: BLINK (replace me) -------------------
+  // Toggles the onboard LED once per second.
+  // Note: this overrides the dashboard switch on V0. Delete this example if you
+  // want the LED to follow the dashboard instead.
+  static unsigned long lastUserBlink = 0;
+  static bool userBlink = false;
+
+  if (millis() - lastUserBlink >= 1000) {  // runs every 1000 ms
+    lastUserBlink = millis();
+    userBlink = !userBlink;
+    digitalWrite(LED_PIN, userBlink ? LOW : HIGH);  // Active LOW: LOW = ON
+  }
+  // -------------------- END OF EXAMPLE: BLINK (replace me) --------------------
+
+  // >>> YOUR OWN CODE / SENSORS GO HERE <<<
+  // Example: send a sensor reading every 5 seconds
+  // static unsigned long lastRead = 0;
+  // if (millis() - lastRead >= 5000) {
+  //   lastRead = millis();
+  //   int analogVal = analogRead(A0);
+  //   omniLink.telemetryInt("sensor_raw", analogVal);
+  // }
+}
+// #####################################################################
+// ##                     END OF YOUR MAIN CODE                       ##
+// #####################################################################
 
 // ======================================================
 // LITTLEFS CONFIGURATION STORAGE
@@ -344,7 +387,7 @@ void setup() {
   }
 
   // =====================================================================
-  // [USER CHANGEABLE] 4. BIND VIRTUAL CHANNELS TO DASHBOARD
+  // [USER CHANGEABLE] 6. BIND VIRTUAL CHANNELS TO DASHBOARD
   // ---------------------------------------------------------------------
   // Map virtual channels (V0, V1, etc.) to your custom callback functions.
   // By default, channels V0 through V7 toggle the onboard LED.
@@ -413,37 +456,5 @@ void loop() {
     }
   }
 
-  // =====================================================================
-  // [USER CHANGEABLE] 5. CUSTOM USER CODE (RUNS CONTINUOUSLY IN LOOP)
-  // ---------------------------------------------------------------------
-  // Put your own sensors, custom calculations, or hardware logic here.
-  //
-  // CRITICAL RULE:
-  // DO NOT use blocking "delay(1000)" here! It freezes background tasks
-  // and will disconnect your device from Wi-Fi & MQTT.
-  // Always use non-blocking timers with millis() as demonstrated below:
-  //
-  // DEFAULT: A small non-blocking blink / heartbeat routine (1 second interval).
-  // You can modify or replace this entire block with your own code!
-  // =====================================================================
-  static unsigned long lastUserBlink = 0;
-  static bool userBlink = false;
-
-  if (millis() - lastUserBlink >= 1000) {  // Runs every 1000 ms (1 second)
-    lastUserBlink = millis();
-    userBlink = !userBlink;
-
-    // Small default blink code (toggle onboard LED):
-    // Note: If you want the dashboard switch (V0) to hold steady state without
-    // blinking, comment out the line below and insert your sensor readings instead!
-    digitalWrite(LED_PIN, userBlink ? LOW : HIGH);
-
-    // -----------------------------------------------------------------
-    // >>> INSERT YOUR OWN CODE / SENSORS BELOW <<<
-    // Examples:
-    // int analogVal = analogRead(A0);
-    // omniLink.telemetryInt("sensor_raw", analogVal);
-    // -----------------------------------------------------------------
-  }
-  // =====================================================================
+  userLoop();  // YOUR MAIN CODE: edit userLoop() in section 5 above
 }

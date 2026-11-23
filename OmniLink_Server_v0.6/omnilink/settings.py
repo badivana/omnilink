@@ -37,6 +37,7 @@ class Settings:
     retry_seconds: float = 3.0
     bootstrap_email: str = ''
     bootstrap_password: str = ''
+    serial_gateway: str = ''   # e.g. COM7: start the Uno/Nano USB gateway with the server
 
     @classmethod
     def from_env(cls):

@@ -121,13 +121,18 @@ def release(s,tenant,refs,exclude_board=None):
         s.execute(delete(Command).where(Command.device_id==device,Command.channel==pin))
         s.flush();reconcile_pin(s,tenant,pin)
 
-def update_board(rt,s,row,widgets,name,revision):
+def board_refs(row):
+    return set().union(*(widget_refs(w,row.device_id) for w in row.widgets)) if row.widgets else set()
+
+def update_board(rt,s,row,widgets,name,revision,admin=True):
     if revision!=row.revision:raise DomainError('Dashboard changed. Reload before saving.',409)
-    old_by_id={w['id']:w for w in row.widgets};new_ids={w['id'] for w in widgets}
-    removed=set().union(*(widget_refs(w,row.device_id) for key,w in old_by_id.items() if key not in new_ids)) if old_by_id else set()
-    remaining=set().union(*(widget_refs(w,row.device_id) for w in widgets)) if widgets else set()
-    if removed&remaining:
-        error=DomainError('Another widget in this layout still uses a pin being released. Remove or rebind it before saving.',409)
-        error.dependencies=[{'kind':'widget','id':w['id'],'name':w['title']} for w in widgets if widget_refs(w,row.device_id)&removed];raise error
-    release(s,row.tenant_id,removed,row.id)
+    # Releasing a pin deletes the channel, which only administrators may do; operators only edit the layout.
+    if admin:
+        old_by_id={w['id']:w for w in row.widgets};new_ids={w['id'] for w in widgets}
+        removed=set().union(*(widget_refs(w,row.device_id) for key,w in old_by_id.items() if key not in new_ids)) if old_by_id else set()
+        remaining=set().union(*(widget_refs(w,row.device_id) for w in widgets)) if widgets else set()
+        if removed&remaining:
+            error=DomainError('Another widget in this layout still uses a pin being released. Remove or rebind it before saving.',409)
+            error.dependencies=[{'kind':'widget','id':w['id'],'name':w['title']} for w in widgets if widget_refs(w,row.device_id)&removed];raise error
+        release(s,row.tenant_id,removed,row.id)
     row.widgets=widgets;row.name=name;row.revision+=1;row.updated_ms=now_ms()

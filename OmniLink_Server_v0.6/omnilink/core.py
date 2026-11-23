@@ -2,8 +2,7 @@
 import base64
 import hashlib
 import hmac
-import json
-import math
+import logging
 import operator
 import re
 import secrets
@@ -17,6 +16,7 @@ from .onp import Type, encode_value, ProtocolError
 ACTIVE = ('queued', 'sent', 'accepted')
 METRIC = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
 HEX32 = re.compile(r'^[0-9a-f]{32}$')
+log = logging.getLogger('omnilink')
 
 class DomainError(ValueError):
     def __init__(self, message, status=400):
@@ -313,7 +313,10 @@ class Core:
         for r in s.scalars(select(Rule).where(Rule.device_id==d.id,Rule.metric==m['name'],Rule.enabled==True)):
             active=ops[r.op](m['value'],r.threshold)
             if active and not r.active and now_ms()>=r.last_trigger_ms+r.cooldown_s*1000:
-                c=self._write(s,d,r.channel,r.value,'rule')
+                # A rule whose target pin changed must not reject the device's telemetry.
+                try: c=self._write(s,d,r.channel,r.value,'rule')
+                except DomainError as exc:
+                    log.warning('Rule %s skipped: %s',r.id,exc);c=None
                 if c: r.last_trigger_ms=now_ms()
             r.active=active
 
@@ -344,7 +347,9 @@ class Core:
                 value=sc.alternate_value if sc.kind=='cycle' and sc.phase else sc.value
                 # No catch-up burst after downtime; stale occurrences are skipped.
                 if current-due<30_000:
-                    self._write(s,d,sc.channel,value,'schedule',request_id=f'schedule:{sc.id}:{due}')
+                    # One invalid schedule must not roll back the whole tick for every account.
+                    try: self._write(s,d,sc.channel,value,'schedule',request_id=f'schedule:{sc.id}:{due}')
+                    except DomainError as exc: log.warning('Schedule %s skipped: %s',sc.id,exc)
                 if sc.kind=='daily': sc.next_due_ms=self.calendar_next(sc,current)
                 elif sc.kind=='cycle':
                     period=(sc.interval_s+sc.alternate_interval_s)*1000

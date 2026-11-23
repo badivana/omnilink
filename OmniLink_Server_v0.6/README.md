@@ -6,15 +6,126 @@ No aquarium channels, manual/AUTO hardware modes, units, or actuator relationshi
 
 ## Arduino devices
 
-The separate **OmniLink Arduino library v0.2** provides HTTP/HTTPS and MQTT examples for ESP32 and ESP8266, plus an Arduino Uno/Nano USB-Serial library and HTTPS gateway example. The server stores virtual pins; each sketch maps them to that board's GPIOs or hardware actions. See the library README and `examples/arduino_uno_serial_gateway.py` for setup. Uno serial needs a computer running the gateway; it is not a direct network connection. Keep device credentials private.
+The **OmniLink Arduino library 0.3** is a separate package, like the web client. Keep its folder next to the server folder:
 
-For an Uno connected to this Windows server computer, save its device ID/secret as `device-credentials.json` in Documents, then run this in the server folder after uploading `ArduinoUno_Serial.ino`:
-
-```bat
-.venv\Scripts\python examples\arduino_uno_serial_gateway.py --serial COM4 --url http://localhost:8000 --credentials "C:\Users\YOUR_NAME\Documents\device-credentials.json"
+```
+OmniLink_Server_v0.6/
+OmniLink_WebClient_v0.6/
+OmniLink_Arduino_v0.3/     <- import this folder in the Arduino IDE
 ```
 
-Replace `COM4` with the port shown in Device Manager. For a deployed server, use its HTTPS URL. Close Arduino Serial Monitor first so the gateway can own the COM port. The ESP examples connect directly and do not need this gateway.
+It supports:
+
+| Board | How it connects | Example sketch |
+|---|---|---|
+| ESP32 / ESP8266 | Wi-Fi, directly to the server over HTTP(S) or MQTT TLS | `ESP32_HTTP`, `ESP32_MQTT`, `ESP8266_HTTP`, `ESP8266_MQTT` |
+| ESP8266 (NodeMCU) | Wi-Fi set up from a phone hotspot, optional OTA updates, MQTT TLS | `ESP8266_Provisioning` |
+| Arduino Uno / Nano | USB cable to a PC that runs the OmniLink **serial gateway** | `ArduinoUno_Serial` |
+
+ESP boards talk to the server themselves. An Uno or Nano has no network hardware, so it cannot use Wi-Fi or MQTT; it needs the gateway program running on a PC it is plugged into (see [Uno / Nano over USB](#uno--nano-over-usb)). MQTT devices also need the Mosquitto broker running (see [Native Mosquitto setup](#native-mosquitto-setup-runinstall-no-docker)).
+
+### Virtual pins
+
+The server stores **virtual pins** (V0, V1, …); each sketch maps them to the board's real GPIOs. Two rules matter:
+
+- **Pin numbers are unique per account.** If V0 belongs to one device, no other device in that account can use V0. Give every board its own numbers (for example V0–V7 for an ESP8266, V10–V13 for a Nano).
+- **The pin type on the server must match the sketch.** A sketch handler `onBool` needs a BOOL pin, `onUInt` an unsigned integer pin (UINT8/16/32), `onInt` a signed one, `onFloat` FLOAT32. A mismatch makes the board reject commands with error 400. A pin's type cannot change after it has been used; delete it and add it again instead.
+
+The examples use these pins, which `python -m examples.create_demo` creates in a fresh account:
+
+| Pin | Name | Type | Writable | Range |
+|---|---|---|---|---|
+| V0 | Power | BOOL | yes | |
+| V1 | Output selection | UINT8 | yes | 0–1 |
+| V2 | Setpoint (measurement interval, seconds) | UINT32 | yes | 1–300 |
+| V3 | Measurement | FLOAT32 | no | 0–100 |
+
+If you use other numbers, change the `PIN_...` constants at the top of the sketch to match **Devices & pins**.
+
+### Install the library in the Arduino IDE
+
+The sketches start with `#include <OmniLink.h>`, so the library must be installed or compiling fails with `OmniLink.h: No such file or directory`.
+
+1. Close **every** Arduino IDE window. Delete any older copy in `Documents\Arduino\libraries` (a folder named `OmniLink` or `OmniLink_Arduino_v0.3`); two copies conflict.
+2. Open the IDE and choose **Sketch → Include Library → Add .ZIP Library…**.
+   - **Arduino IDE 1.8:** select the `OmniLink_Arduino_v0.3` **folder** next to the server folder. No ZIP needed.
+   - **Arduino IDE 2.x** (only accepts ZIP files): first build the ZIP in the server folder, then select it. It is written next to the server folder as `OmniLink_Arduino_v0.3.zip`:
+
+     ```bat
+     .venv\Scripts\python tools\build_arduino_library.py
+     ```
+
+   Do not just copy a ZIP into the `libraries` folder; the IDE ignores it there.
+3. Open the example under **File → Examples → Examples from Custom Libraries → OmniLink**.
+
+Also install **ArduinoJson 7** (and **PubSubClient** and **WiFiManager** for the MQTT/ESP8266 sketches) from **Tools → Manage Libraries**. Repeat steps 1–2 whenever the library is updated, then restart the IDE: it only rescans libraries when it starts.
+
+### Uno / Nano over USB
+
+How it works:
+
+```
+Nano (sketch with DEVICE_ID / DEVICE_SECRET) --USB--> serial gateway on the PC --HTTP(S)--> OmniLink server
+```
+
+The device ID and secret are stored in the sketch. When the gateway starts it asks the board for them over USB, signs in to the server as that device, and then passes commands to the board and readings back. The PC must stay on with the gateway running.
+
+**First-time setup**
+
+1. In the web client, open **Devices & pins → + Device**, create the device and copy its **ID** and **secret**.
+2. Use **+ Pin** on that device to add the pins the sketch uses, with matching types (see [Virtual pins](#virtual-pins)).
+3. Open **File → Examples → OmniLink → ArduinoUno_Serial** and fill in the `[CHANGE]` block at the top:
+
+   ```cpp
+   const char DEVICE_ID[]     = "dev_...";     // from Devices & pins
+   const char DEVICE_SECRET[] = "...";         // 64 hex characters
+   ```
+
+   Set the `PIN_...` constants to your pin numbers. Physical wiring: an LED/relay on **D7** (output A) and **D8** (output B), a sensor on **A0**. Outputs are active LOW by default (`OUTPUT_ACTIVE_LOW = true`, LED from D7 through a resistor to 5V); set it to `false` if the LED goes from D7 to GND.
+4. Select **Tools → Board → Arduino Nano** (most clones also need **Processor → ATmega328P (Old Bootloader)**) and the board's COM port from Device Manager, then upload.
+5. Close the Serial Monitor and start the gateway (below).
+
+**Run the gateway** (recommended: in its own window, so the server never has to stop). Open a second terminal in the server folder and run, replacing `COM7` with your port:
+
+```bat
+.venv\Scripts\python examples\arduino_uno_serial_gateway.py --serial COM7 --url http://127.0.0.1:8000
+```
+
+Keep that window open. It prints `Connected; N configured pins: …` when the board is online. Start it again by hand after closing the window or restarting the PC. For a server on another machine, use that server's URL (HTTPS for anything outside a private test network).
+
+**Upload new code without stopping the server.** Only one program can hold a COM port, so the gateway must let go of it during an upload:
+
+1. Press **Ctrl+C** in the gateway window.
+2. Upload from the Arduino IDE.
+3. Press **↑** then **Enter** in the gateway window to start it again.
+
+The board resets when the gateway connects, so its outputs briefly return to their power-on state.
+
+**Optional: start the gateway with the server.** Add `OMNILINK_SERIAL_GATEWAY=COM7` to `.env` and restart `run.bat`. The server then runs the gateway itself and restarts it 5 seconds after it stops. It supports one board. Because the server then holds the port, an upload must happen in that 5-second gap: click **Verify**, stop only the gateway process, then click **Upload** immediately:
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object CommandLine -like '*arduino_uno_serial_gateway*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+If you upload often, use the separate gateway window instead.
+
+**Keeping the secret off the board.** Leave `DEVICE_ID` and `DEVICE_SECRET` empty in the sketch and pass a credentials file to the gateway instead: `--credentials "C:\Users\YOUR_NAME\Documents\device-credentials.json"` containing `{"id":"dev_...","secret":"..."}`. Otherwise anyone with USB access to the board can read its secret.
+
+### Arduino troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `OmniLink.h: No such file or directory` | The library is not installed, or is nested one folder too deep (`libraries\OmniLink\OmniLink_Arduino_v0.3\src`). Reinstall it as described above. |
+| OmniLink is missing from **File → Examples** | The IDE was open during installation; close all IDE windows and reopen. Arduino IDE 1.8 also skips libraries without a `url=` line in `library.properties` (fixed in the current ZIP). |
+| You still see the old sketch without `DEVICE_ID` | An older library copy is installed. Delete it from `Documents\Arduino\libraries` and add the current library again. |
+| `ser_open(): can't open device "\\.\COM6"` on upload | Wrong port: the board is on another COM port. Check Device Manager (a Nano clone usually shows as `USB-SERIAL CH340 (COMx)`). |
+| Upload or gateway says `Access is denied` for the COM port | Another program holds the port: Serial Monitor/Plotter, the gateway, or the server's auto-started gateway. Close it, then retry. |
+| Gateway says the board has no device ID/secret | Fill in `DEVICE_ID` and `DEVICE_SECRET` in the sketch and upload again. |
+| Gateway says the board did not answer with its device ID | The board runs an older sketch or library. Install the current library ZIP, then upload `ArduinoUno_Serial` again. |
+| Commands show **rejected** with error 400 | The server pin's type does not match the sketch handler (for example a BOOL pin where the sketch expects UINT8). |
+| Commands show **rejected** with error 404 | The sketch has no handler for that pin number. Match the `PIN_...` constants to the server pins. |
+| Gateway prints `Ignoring report for Vn: not configured` | That pin does not exist on this device (or belongs to another device). Add it under **Devices & pins**, or change the sketch's pin numbers. |
+| Pin cannot be added: already allocated | Another device in the account owns that number. Choose a free number. |
 
 ## New in v0.6
 
@@ -29,7 +140,9 @@ setup.bat
 run.bat
 ```
 
-Setup asks you to create your own OmniLink administrator email/password (at least 12 characters). Open **http://localhost:8000/** and sign in. The server window stays open; Ctrl+C stops it. Use exactly the URL in `OMNILINK_PUBLIC_URL` to avoid Origin rejected.
+Setup asks you to create your own OmniLink administrator email/password (at least 12 characters). Open **http://localhost:8000/** and sign in. The server window stays open; Ctrl+C stops it.
+
+**"Origin rejected" when signing in:** the browser must open exactly the address in `OMNILINK_PUBLIC_URL` in `.env`. `localhost`, `127.0.0.1` and the PC's LAN IP all count as different addresses. To use the dashboard from other devices on your network, set `OMNILINK_PUBLIC_URL=http://<this PC's LAN IP>:8000` and `OMNILINK_HTTP_HOST=0.0.0.0`, then restart `run.bat` (the server reads `.env` only at start). If your router gives the PC a new IP address, update the setting and restart again; reserving the address in the router avoids this.
 
 For a native public VPS, initialize with a DNS name instead: `setup.bat --domain iot.your-domain.com` (Windows) or `sh setup.sh --domain iot.your-domain.com` (Debian/Ubuntu). This enables HTTPS directly on port 8000 using the generated private device CA. Keep the generated `data/certs/ca.crt` and install it in devices and browsers that need to trust the server.
 

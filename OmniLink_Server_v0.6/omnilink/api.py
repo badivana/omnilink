@@ -157,10 +157,11 @@ class Runtime:
                 if now_ms()-last_prune>3600_000:
                     self.core.prune();last_prune=now_ms()
                 with self.db.session() as s:
-                    ids=list(s.scalars(select(Device.id).where(Device.enabled==True)))
-                for device_id in ids:
+                    devices=list(s.execute(select(Device.id,Device.transport).where(Device.enabled==True)))
+                for device_id,transport in devices:
                     connection=self.native_sessions.get(device_id)
-                    if not connection and not (self.mqtt and self.mqtt.ready): continue
+                    # HTTP devices poll for commands; an MQTT push would only delay their next poll.
+                    if not connection and (transport=='http' or not (self.mqtt and self.mqtt.ready)): continue
                     try: pending=self.core.pending(device_id)
                     except DomainError: continue
                     for c in pending:
@@ -324,7 +325,7 @@ def create_app(settings=None):
             row=s.get(Dashboard,dashboard_id)
             if not row or row.device_id!=device_id or row.tenant_id!=u.tenant_id: raise DomainError('Dashboard not found',404)
             if row.revision!=body.revision: raise DomainError('Dashboard changed in another session. Reload its layout before saving.',409)
-            platform.update_board(rt,s,row,validate_widgets(rt.core,s,device_id,body.widgets),body.name,body.revision)
+            platform.update_board(rt,s,row,validate_widgets(rt.core,s,device_id,body.widgets),body.name,body.revision,u.role=='admin')
             result=dashboard_obj(row)
         rt.broadcast(u.tenant_id,'dashboard',{'device_id':device_id,'id':dashboard_id})
         return result
@@ -336,8 +337,7 @@ def create_app(settings=None):
             row=s.get(Dashboard,dashboard_id)
             if not row or row.device_id!=device_id or row.tenant_id!=u.tenant_id: raise DomainError('Dashboard not found',404)
             if row.revision!=revision: raise DomainError('Dashboard changed in another session. Reload first.',409)
-            refs=set().union(*(platform.widget_refs(w,row.device_id) for w in row.widgets)) if row.widgets else set()
-            platform.release(s,u.tenant_id,refs,row.id)
+            if u.role=='admin':platform.release(s,u.tenant_id,platform.board_refs(row),row.id)
             s.delete(row)
         rt.broadcast(u.tenant_id,'dashboard',{'device_id':device_id,'id':dashboard_id})
         return {'ok':True}

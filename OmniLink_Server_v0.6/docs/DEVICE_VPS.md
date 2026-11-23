@@ -36,7 +36,7 @@ This opens TCP 1883 without transport encryption. It is suitable only for an iso
 
 ## ESP32 and ESP8266 transports
 
-Install the OmniLink Arduino library and its dependencies (`PubSubClient` and `ArduinoJson`). Select the HTTP or MQTT example folder for the board. The examples default to verified TLS. Set `HOST` or `BASE_URL` to the public DNS name, never `localhost`.
+Install the OmniLink Arduino library 0.3 from the `OmniLink_Arduino_v0.3` folder next to the server folder (**Sketch → Include Library → Add .ZIP Library**) and its dependencies (`PubSubClient` and `ArduinoJson` 7). Select the HTTP or MQTT example folder for the board. The examples use the pins created by `python -m examples.create_demo --url https://iot.example.com`. The examples default to verified TLS. Set `HOST` or `BASE_URL` to the public DNS name, never `localhost`.
 
 | Sketch | VPS endpoint | TLS trust file |
 |---|---|---|
